@@ -1,0 +1,23 @@
+conda create -n llama_env python=3.10 -y
+
+pip install transformers huggingface_hub bitsandbytes accelerate
+
+myscript.sh
+#!/bin/bash
+
+#SBATCH --account=bcaq-delta-gpu   # Your valid account
+#SBATCH --job-name=simple_job      # Job name
+#SBATCH --output=simple_job.%j.out # Output log file
+#SBATCH --error=simple_job.%j.err  # Error log file
+#SBATCH --mem=4G                   # Memory request
+#SBATCH --nodes=1                  # Number of nodes
+#SBATCH --ntasks=1                 # Number of tasks
+#SBATCH --cpus-per-task=1          # CPUs per task
+#SBATCH --gpus=1                   # Number of GPUs
+#SBATCH --partition=gpuA40x4       # Partition
+#SBATCH --time=00:08:00            # Max runtime
+
+source ~/.bashrc
+conda activate llama_env
+
+python ~/SSGTT/test_llama.py
