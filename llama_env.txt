@@ -1,5 +1,9 @@
 conda create -n llama_env python=3.10 -y
 
+conda activate llama_env
+
+pip install python-dotenv
+
 pip install transformers huggingface_hub bitsandbytes accelerate
 
 myscript.sh
