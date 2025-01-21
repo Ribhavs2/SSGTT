@@ -586,7 +586,8 @@ def load_processed_data(output_dir):
 
 def main():
     # Define paths and augmentation parameters
-    dataset_path = r'Data\WikiOFGraph-test.jsonl'
+    # dataset_path = r'Data\WikiOFGraph-test.jsonl'
+    dataset_path = r'Data/WikiOFGraph-test.jsonl'
     output_dir = r'Processed_Data'
     m = 3  # Number of shuffled graph variants
     n = 2  # Number of paraphrased text variants

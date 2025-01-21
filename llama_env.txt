@@ -1,19 +1,4 @@
-wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh
-bash Miniforge3-Linux-aarch64.sh
-
-conda create -n llama_env python=3.10 -y
-
-conda activate llama_env
-
-pip install python-dotenv
-
-pip install transformers huggingface_hub bitsandbytes accelerate
-
-module load python/miniforge3_pytorch/2.5.0
-
-python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
-
-myscript.sh
+#myscript.sh
 #!/bin/bash
 
 #SBATCH --account=bcaq-dtai-gh     # Your valid account
