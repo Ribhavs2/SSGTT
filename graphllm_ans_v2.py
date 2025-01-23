@@ -112,7 +112,9 @@ class GraphLLM(torch.nn.Module):
             nn.Linear(2048, 4096),
         ).to(self.model.device)
 
-        self.word_embedding = self.model.model.get_input_embeddings()
+        # self.word_embedding = self.model.model.get_input_embeddings()
+        self.word_embedding = self.model.get_input_embeddings()
+
         
         self.no_graph_embedding = nn.Parameter(
         torch.randn(1, 1, args.gnn_hidden_dim) / math.sqrt(args.gnn_hidden_dim)
