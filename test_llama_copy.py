@@ -92,12 +92,12 @@ def generate_paraphrases_from_file(pipeline, input_file: str, output_file: str, 
         input_texts = [line.strip() for line in f.readlines()]
 
     paraphrases = []
-    num_batches = (len(input_texts) + batch_size - 1) // batch_size  # 计算 batch 数
+    num_batches = (len(input_texts) + batch_size - 1) // batch_size
 
     for batch_idx in range(num_batches):
         batch_inputs = input_texts[batch_idx * batch_size: (batch_idx + 1) * batch_size]
 
-        for repeat in range(num_repeats):  # 每个输入推理 num_repeats 次
+        for repeat in range(num_repeats):
             batch_results = generate_responses(
                 pipeline,
                 "You are a helpful assistant who paraphrases sentences.",
