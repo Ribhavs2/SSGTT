@@ -11,8 +11,9 @@ from math import factorial
 
 
 from transformers import pipeline
+from test_llama import load_pipeline, generate_paraphrases
 
-paraphraser = pipeline("text2text-generation", model="t5-base")
+# paraphraser = pipeline("text2text-generation", model="t5-base")
 
 def generate_shuffled_graphs(triples, m):
     """
@@ -38,30 +39,29 @@ def generate_shuffled_graphs(triples, m):
 
 
 
-def generate_paraphrases(text, n):
-    """
-    Generate n paraphrased versions of the input text using a paraphraser.
-    """
-    paraphrases = []
-    for _ in range(n):
-        paraphrase = paraphraser(text, num_return_sequences=1)[0]['generated_text']
-        paraphrases.append(paraphrase)
-    return paraphrases
+# def generate_paraphrases(text, n):
+#     """
+#     Generate n paraphrased versions of the input text using a paraphraser.
+#     """
+#     paraphrases = []
+#     for _ in range(n):
+#         paraphrase = paraphraser(text, num_return_sequences=1)[0]['generated_text']
+#         paraphrases.append(paraphrase)
+#     return paraphrases
 
-def augment_graph_text_pair(graph, text, m, n):
+def augment_graph_text_pair(graph, text, m, n, pipeline):
     """
     Combine shuffled graphs and paraphrased texts into m*n augmented training pairs.
     """
     shuffled_graphs = generate_shuffled_graphs(graph, m)
-    # paraphrased_texts = generate_paraphrases(text, n)
+    paraphrased_texts = generate_paraphrases(pipeline, text, n)
     augmented_pairs = []
 
     for shuffled_graph in shuffled_graphs:
-        # for paraphrased_text in paraphrased_texts:
-        #     augmented_pairs.append({"triplet": shuffled_graph, "text": paraphrased_text})
+        for paraphrased_text in paraphrased_texts:
+            augmented_pairs.append({"triplet": shuffled_graph, "text": paraphrased_text})
         augmented_pairs.append({"triplet": shuffled_graph, "text": text})
 
-    # print("augmented pairs: ", augmented_pairs)
     return augmented_pairs
 
 
@@ -590,7 +590,7 @@ def main():
     dataset_path = r'Data/WikiOFGraph-test.jsonl'
     output_dir = r'Processed_Data'
     m = 3  # Number of shuffled graph variants
-    n = 2  # Number of paraphrased text variants
+    n = 3  # Number of paraphrased text variants
 
     # Load the WikiofGraph dataset
     print("Loading WikiofGraph data ...")
@@ -602,8 +602,13 @@ def main():
     # Initialize GraphProcessor
     graph_processor = GraphProcessor()
 
+
+    model_id = "./models/Llama-3.1-8B-Instruct"
+    pipeline = load_pipeline(model_id)
+
     # Process and augment each graph-text pair in the dataset
     print("Augmenting graph-text pairs ...")
+    i = 0
     for item in tqdm(wikiofgraph_data):
         try:
             # Extract triples and text
@@ -617,11 +622,11 @@ def main():
             # break
 
             # Generate augmented pairs
-            augmented_pairs = augment_graph_text_pair(triples, text, m, n)
+            augmented_pairs = augment_graph_text_pair(triples, text, m, n, pipeline)
             augmented_data.extend(augmented_pairs)
-            # i += 1
-            # if i == 2:
-            #     break            
+            i += 1
+            if i == 1:
+                break            
             
         except Exception as e:
             print(f"Error processing item: {e}")
@@ -637,9 +642,9 @@ def main():
     i = 0
     for item in tqdm(augmented_data):
         # print(item)
-        i += 1
-        if i == 20:
-            break
+        # i += 1
+        # if i == 7:
+        #     break
         try:
             # Extract triples and text
             # triples = item['triplet'].strip('()').split('), ')

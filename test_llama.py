@@ -47,7 +47,7 @@ def generate_paraphrases(pipeline, text: str, n: int, max_new_tokens: int = 200,
     :return: A list of paraphrased versions of the text.
     """
     paraphrases = []
-    for _ in range(n):
+    for _ in range(n-1):
         paraphrase = generate_response(
             pipeline,
             "You are a helpful assistant who paraphrases sentences.",
@@ -59,12 +59,12 @@ def generate_paraphrases(pipeline, text: str, n: int, max_new_tokens: int = 200,
     return paraphrases
 
 # Example usage
-if __name__ == "__main__":
-    model_id = "./models/Llama-3.1-8B-Instruct"
-    pipeline = load_pipeline(model_id)
+# if __name__ == "__main__":
+#     model_id = "./models/Llama-3.1-8B-Instruct"
+#     pipeline = load_pipeline(model_id)
     
-    input_text = "Jack the Dog is a 2001 American comedy-drama film, written and directed by Bobby Roth and starring Néstor Carbonell, Barbara Williams, Barry Newman, and Anthony LaPaglia."
-    paraphrased_versions = generate_paraphrases(pipeline, input_text, 3)
+#     input_text = "Jack the Dog is a 2001 American comedy-drama film, written and directed by Bobby Roth and starring Néstor Carbonell, Barbara Williams, Barry Newman, and Anthony LaPaglia."
+#     paraphrased_versions = generate_paraphrases(pipeline, input_text, 3)
     
-    for i, para in enumerate(paraphrased_versions, 1):
-        print(f"Paraphrase {i}: {para}")
+#     for i, para in enumerate(paraphrased_versions, 1):
+#         print(f"Paraphrase {i}: {para}")
