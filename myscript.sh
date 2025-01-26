@@ -1,4 +1,3 @@
-#myscript.sh
 #!/bin/bash
 
 #SBATCH --account=bcaq-dtai-gh     # Your valid account
@@ -16,5 +15,4 @@
 source ~/.bashrc
 conda activate llama_env
 
-python ~/SSGTT/test_llama.py
-
+python ~/Research/SSGTT/a_planner_data_process.py
