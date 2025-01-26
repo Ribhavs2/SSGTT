@@ -121,7 +121,7 @@ if __name__ == "__main__":
     model_id = "./models/Llama-3.1-8B-Instruct"
     pipeline = load_pipeline(model_id)
 
-    input_file = "output_texts.txt"   # 100 line input_text
-    output_file = "paraphrased_outputs.txt"
+    input_file = "output_texts_3000.txt"   # 100 line input_text
+    output_file = "paraphrased_outputs_v3000.txt"
 
-    generate_paraphrases_from_file(pipeline, input_file, output_file, batch_size=5, num_repeats=2)
+    generate_paraphrases_from_file(pipeline, input_file, output_file, batch_size=1500, num_repeats=2)

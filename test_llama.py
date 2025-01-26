@@ -1,5 +1,6 @@
 import transformers
 import torch
+import time
 
 def load_pipeline(model_id: str, device: int = 0):
     """
@@ -9,62 +10,116 @@ def load_pipeline(model_id: str, device: int = 0):
     :param device: Device to load the model on (0 for GPU, -1 for CPU).
     :return: A text-generation pipeline.
     """
-    return transformers.pipeline(
+    pipeline = transformers.pipeline(
         "text-generation",
         model=model_id,
         model_kwargs={"torch_dtype": torch.bfloat16},
-        device=device,
+        device_map="auto",
     )
 
-def generate_response(pipeline, system_prompt: str, user_input: str, max_new_tokens: int = 256, temperature: float = 0.4):
+    pipeline.tokenizer.padding_side = "left" 
+    if pipeline.tokenizer.pad_token is None:
+        pipeline.tokenizer.pad_token = pipeline.tokenizer.eos_token 
+
+    return pipeline
+
+def generate_responses(pipeline, system_prompt: str, user_inputs: list, max_new_tokens: int = 256, temperature: float = 0.4):
     """
-    Generate a response from the model using a chat format.
+    Generate responses for a batch of inputs using Llama 3 chat template.
     
     :param pipeline: The loaded text-generation pipeline.
     :param system_prompt: The system role prompt.
-    :param user_input: The user's input message.
+    :param user_inputs: A list of user input messages.
     :param max_new_tokens: Maximum number of new tokens to generate.
     :param temperature: Sampling temperature.
-    :return: The model's response in text.
+    :return: A list of tuples containing the model's response texts and response times.
     """
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_input},
+    messages_list = [
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input},
+        ]
+        for user_input in user_inputs
     ]
-    
-    outputs = pipeline(messages, max_new_tokens=max_new_tokens, temperature=temperature)
-    return outputs[0]["generated_text"][-1]
 
-def generate_paraphrases(pipeline, text: str, n: int, max_new_tokens: int = 200, temperature: float = 0.4):
+    # **Use Llama 3 chat template**
+    prompts = [pipeline.tokenizer.apply_chat_template(msg, tokenize=False, add_generation_prompt=True) for msg in messages_list]
+
+    # terminators`<|eot_id|>` or `eos_token_id`
+    terminators = [
+        pipeline.tokenizer.eos_token_id,
+        pipeline.tokenizer.convert_tokens_to_ids("<|eot_id|>")
+    ]
+
+    start_time = time.time()
+    outputs = pipeline(
+        prompts,
+        max_new_tokens=max_new_tokens,
+        eos_token_id=terminators,
+        do_sample=True,
+        temperature=temperature,
+        top_p=0.9,
+        batch_size=len(user_inputs)
+    )
+    end_time = time.time()
+
+    response_time = end_time - start_time
+
+    cleaned_outputs = []
+    for output in outputs:
+        response_text = output[0]["generated_text"]
+        
+        response_text = response_text.split("<|eot_id|>")[-1]  
+        response_text = response_text.replace("<|start_header_id|>assistant<|end_header_id|>", "").strip()
+        
+        cleaned_outputs.append((response_text, response_time))
+
+    return cleaned_outputs
+
+def generate_paraphrases(pipeline, input_texts: list, batch_size: int = 5, max_new_tokens: int = 200, temperature: float = 0.4, num_repeats: int = 2):
     """
-    Generate multiple paraphrases for a given text.
+    Generate paraphrases for a list of input texts using batch inference.
     
     :param pipeline: The loaded text-generation pipeline.
-    :param text: The input text to paraphrase.
-    :param n: Number of paraphrases to generate.
+    :param input_texts: A list of input texts to be paraphrased.
+    :param batch_size: Number of paraphrases to generate per batch.
     :param max_new_tokens: Maximum number of new tokens to generate.
     :param temperature: Sampling temperature.
-    :return: A list of paraphrased versions of the text.
+    :param num_repeats: Number of times to paraphrase each input.
+    :return: A list of paraphrased texts.
     """
     paraphrases = []
-    for _ in range(n):
-        paraphrase = generate_response(
-            pipeline,
-            "You are a helpful assistant who paraphrases sentences.",
-            f"Paraphrase this sentence: {text}",
-            max_new_tokens,
-            temperature
-        )
-        paraphrases.append(paraphrase["content"])
+    num_batches = (len(input_texts) + batch_size - 1) // batch_size
+
+    for batch_idx in range(num_batches):
+        batch_inputs = input_texts[batch_idx * batch_size: (batch_idx + 1) * batch_size]
+
+        for _ in range(num_repeats):
+            batch_results = generate_responses(
+                pipeline,
+                "You are a helpful assistant who paraphrases sentences.",
+                [f"Paraphrase this sentence: {text}" for text in batch_inputs],
+                max_new_tokens,
+                temperature
+            )
+
+            paraphrases.extend([para for para, _ in batch_results])
+
     return paraphrases
 
 # Example usage
 if __name__ == "__main__":
     model_id = "./models/Llama-3.1-8B-Instruct"
     pipeline = load_pipeline(model_id)
-    
-    input_text = "Jack the Dog is a 2001 American comedy-drama film, written and directed by Bobby Roth and starring Néstor Carbonell, Barbara Williams, Barry Newman, and Anthony LaPaglia."
-    paraphrased_versions = generate_paraphrases(pipeline, input_text, 3)
-    
-    for i, para in enumerate(paraphrased_versions, 1):
-        print(f"Paraphrase {i}: {para}")
+
+    input_texts = [
+        "The quick brown fox jumps over the lazy dog.",
+        "Artificial intelligence is transforming the world.",
+        "Learning new languages can be a rewarding experience."
+    ]
+
+    paraphrased_texts = generate_paraphrases(pipeline, input_texts, batch_size=3, num_repeats=2)
+    print(paraphrased_texts)
+
+    for idx, para in enumerate(paraphrased_texts):
+        print(f"Paraphrase {idx+1}: {para}")
