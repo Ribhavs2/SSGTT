@@ -16,3 +16,5 @@ source ~/.bashrc
 conda activate llama_env
 
 python ~/Research/SSGTT/a_planner_data_process.py
+# python ~/Research/SSGTT/test_training.py
+# python ~/Research/SSGTT/test_llama.py

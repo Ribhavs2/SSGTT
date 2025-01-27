@@ -2,6 +2,9 @@ import transformers
 import torch
 import time
 
+from collections import defaultdict
+
+
 def load_pipeline(model_id: str, device: int = 0):
     """
     Load the text-generation pipeline with the specified model.
@@ -76,25 +79,37 @@ def generate_responses(pipeline, system_prompt: str, user_inputs: list, max_new_
 
     return cleaned_outputs
 
-def generate_paraphrases(pipeline, input_texts: list, batch_size: int = 5, max_new_tokens: int = 200, temperature: float = 0.4, num_repeats: int = 2):
+def generate_paraphrases(
+    pipeline, 
+    input_texts: list, 
+    batch_size: int = 5, 
+    max_new_tokens: int = 200, 
+    temperature: float = 0.4, 
+    num_repeats: int = 2
+):
     """
     Generate paraphrases for a list of input texts using batch inference.
-    
+
     :param pipeline: The loaded text-generation pipeline.
     :param input_texts: A list of input texts to be paraphrased.
     :param batch_size: Number of paraphrases to generate per batch.
     :param max_new_tokens: Maximum number of new tokens to generate.
     :param temperature: Sampling temperature.
     :param num_repeats: Number of times to paraphrase each input.
-    :return: A list of paraphrased texts.
+    :return: A list of lists of paraphrased texts for each input text.
     """
-    paraphrases = []
+    paraphrases = defaultdict(list)  # Use a dictionary to group paraphrases by input text index
     num_batches = (len(input_texts) + batch_size - 1) // batch_size
 
     for batch_idx in range(num_batches):
         batch_inputs = input_texts[batch_idx * batch_size: (batch_idx + 1) * batch_size]
 
-        for _ in range(num_repeats):
+        # Always add the original text as the first variant
+        for idx, text in enumerate(batch_inputs):
+            paraphrases[batch_idx * batch_size + idx].append(text)
+
+        # Generate additional paraphrased variants
+        for _ in range(num_repeats - 1):
             batch_results = generate_responses(
                 pipeline,
                 "You are a helpful assistant who paraphrases sentences.",
@@ -102,24 +117,27 @@ def generate_paraphrases(pipeline, input_texts: list, batch_size: int = 5, max_n
                 max_new_tokens,
                 temperature
             )
+            for idx, (para, _) in enumerate(batch_results):
+                paraphrases[batch_idx * batch_size + idx].append(para)
 
-            paraphrases.extend([para for para, _ in batch_results])
+    # Convert dictionary to a list of lists
+    paraphrased_texts = [paraphrases[idx] for idx in range(len(input_texts))]
+    return paraphrased_texts
 
-    return paraphrases
 
 # Example usage
-if __name__ == "__main__":
-    model_id = "./models/Llama-3.1-8B-Instruct"
-    pipeline = load_pipeline(model_id)
+# if __name__ == "__main__":
+#     model_id = "./models/Llama-3.1-8B-Instruct"
+#     pipeline = load_pipeline(model_id)
 
-    input_texts = [
-        "The quick brown fox jumps over the lazy dog.",
-        "Artificial intelligence is transforming the world.",
-        "Learning new languages can be a rewarding experience."
-    ]
+#     input_texts = [
+#         "The quick brown fox jumps over the lazy dog.",
+#         "Artificial intelligence is transforming the world.",
+#         "Learning new languages can be a rewarding experience."
+#     ]
 
-    paraphrased_texts = generate_paraphrases(pipeline, input_texts, batch_size=3, num_repeats=2)
-    print(paraphrased_texts)
+#     paraphrased_texts = generate_paraphrases(pipeline, input_texts, batch_size=3, num_repeats=2)
+#     print(paraphrased_texts)
 
-    for idx, para in enumerate(paraphrased_texts):
-        print(f"Paraphrase {idx+1}: {para}")
+    # for idx, para in enumerate(paraphrased_texts):
+    #     print(f"Paraphrase {idx+1}: {para}")
