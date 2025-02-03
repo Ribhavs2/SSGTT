@@ -149,106 +149,119 @@ class GraphProcessor:
         
         return graph, triple_strs  # Return original triple strings for description
 
-
-def process_batch(batch, m, n, pipeline):
+def process_batch(batch):
     """
-    Process a batch of items by performing augmentation for the whole batch.
+    Process a batch to generate graphs without augmentation.
     """
     batch_triples = [item['triplet'].strip('()').split('), ') for item in batch]
     batch_triples = [[triple.strip('()') for triple in triples] for triples in batch_triples]
     batch_texts = [item['text'] for item in batch]
 
-    # Generate augmented pairs for the batch
-    try:
-        augmented_batch = augment_graph_text_pair(batch_triples, batch_texts, m, n, pipeline)
-    except Exception as e:
-        print(f"Error augmenting batch: {e}")
-        augmented_batch = []
-    
-    return augmented_batch
+    processed_batch = []
+    graph_processor = GraphProcessor()
+
+    for triples, text in zip(batch_triples, batch_texts):
+        try:
+            graph, original_triples = graph_processor.create_graph_from_triples(triples)
+            processed_batch.append({'input': original_triples, 'label': text, 'graphs': [graph]})
+        except Exception as e:
+            print(f"Error generating graph: {e}")
+            continue
+
+    return processed_batch
 
 
 def main():
-    # Define paths and augmentation parameters
-    # dataset_path = r'Data\WikiOFGraph-test.jsonl'
-    dataset_path = r'Data/WikiOFGraph-test.jsonl'
+    # Paths and parameters
+    dataset_path = r'Data/WikiOFGraph_train.jsonl'
     output_dir = r'Processed_Data'
-    m = 3  # Number of shuffled graph variants
-    n = 3  # Number of paraphrased text variants
-    batch_size = 5  # Batch size for augmentation
+    m = 2  # Number of shuffled graph variants
+    n = 2  # Number of paraphrased text variants
+    # batch_size = 5000  # Batch size for processing
+    # vanilla_size = 1_000_000  # Number of samples for the vanilla dataset
+    # augmented_size = 80_000  # Number of samples for the augmented dataset
 
-    # Load the WikiofGraph dataset
-    print("Loading WikiofGraph data ...")
+    batch_size = 5  # Batch size for processing
+    vanilla_size = 20  # Number of samples for the vanilla dataset
+    augmented_size = 10  # Number of samples for the augmented dataset
+
+    # Load the dataset
+    print("Loading original dataset ...")
     with open(dataset_path, 'r') as f:
         wikiofgraph_data = [json.loads(line) for line in f]
 
-    augmented_data = []
+    # Sample 1 million random samples for the vanilla dataset
+    print("Selecting 1 million samples for the vanilla dataset ...")
+    vanilla_samples = random.sample(wikiofgraph_data, vanilla_size)
 
-    # Initialize GraphProcessor
-    graph_processor = GraphProcessor()
+    # Process and store the vanilla dataset
+    print("Generating graphs for the vanilla dataset ...")
+    vanilla_data = []
+    for i in tqdm(range(0, len(vanilla_samples), batch_size)):
+        batch = vanilla_samples[i:i + batch_size]
+        vanilla_data.extend(process_batch(batch))
 
+    print(f"Vanilla dataset size: {len(vanilla_data)}")
+
+    # Save the vanilla dataset
+    os.makedirs(output_dir, exist_ok=True)
+    vanilla_jsonl_path = os.path.join(output_dir, 'vanilla_WikiofGraph.jsonl')
+    vanilla_pickle_path = os.path.join(output_dir, 'vanilla_WikiofGraph.pkl')
+
+    with open(vanilla_jsonl_path, 'w') as f:
+        for pair in vanilla_data:
+            f.write(json.dumps(pair, default=str) + '\n')
+
+    with open(vanilla_pickle_path, 'wb') as f:
+        pickle.dump(vanilla_data, f)
+
+    print(f"Vanilla dataset saved to {vanilla_jsonl_path} and {vanilla_pickle_path}")
+
+    # Sample 80,000 for augmentation from the vanilla dataset
+    print("Selecting 80,000 samples for augmentation ...")
+    augmentation_samples = random.sample(vanilla_data, augmented_size)
 
     model_id = "./models/Llama-3.1-8B-Instruct"
     pipeline = load_pipeline(model_id)
 
-  # Augment data in batches
-    j = 0
-    print("Augmenting graph-text pairs in batches ...")
-    for i in tqdm(range(0, len(wikiofgraph_data), batch_size)):
-        batch = wikiofgraph_data[i:i + batch_size]
-        augmented_batch = process_batch(batch, m, n, pipeline)
+    # Process and augment the selected samples
+    augmented_data = []
+    print("Augmenting graph-text pairs ...")
+    graph_processor = GraphProcessor()  # Reuse the same processor
+
+    for i in tqdm(range(0, len(augmentation_samples), batch_size)):
+        batch = augmentation_samples[i:i + batch_size]
+        batch_triples = [item['input'] for item in batch]
+        batch_texts = [item['label'] for item in batch]
+        augmented_batch = augment_graph_text_pair(batch_triples, batch_texts, m, n, pipeline)
+
+        # Generate graphs for augmented pairs
+        for augmented_item in augmented_batch:
+            try:
+                graph, original_triples = graph_processor.create_graph_from_triples(augmented_item["triplet"])
+                augmented_item["graphs"] = [graph]
+            except Exception as e:
+                print(f"Error generating graph for augmented item: {e}")
+                continue
+
         augmented_data.extend(augmented_batch)
 
-        # Remove this to augmenting entire dataset
-        if j == 1:
-            break
-        j+=1
-
-    print(f"Original dataset size: {len(wikiofgraph_data)}")
     print(f"Augmented dataset size: {len(augmented_data)}")
 
-    # Initialize a list to store processed items with graphs
-    processed_data = []
+    # Save the augmented dataset
+    augmented_jsonl_path = os.path.join(output_dir, 'augmented_WikiofGraph.jsonl')
+    augmented_pickle_path = os.path.join(output_dir, 'augmented_WikiofGraph.pkl')
 
-    print("Generating graphs for augmented data ...")
-    # i = 0
-    for item in tqdm(augmented_data):
-        # print(item)
-        # i += 1
-        # if i == 7:
-        #     break
-        try:
-            # Extract triples and text
-            # triples = item['triplet'].strip('()').split('), ')
-            triples = item['triplet']
-            text = item['text']
-
-            # Generate graphs using GraphProcessor
-            graph, original_triples = graph_processor.create_graph_from_triples(triples)
-
-            # Create a processed item
-            processed_item = {
-                'input': original_triples,  # Store the original triples for input
-                'label': text,             # Store the corresponding text as the label
-                'graphs': [graph],         # Store the generated graph
-            }
-            processed_data.append(processed_item)
-        except Exception as e:
-            print(f"Error generating graph for item: {e}")
-            continue
-
-    print(f"Processed data length with graphs: {len(processed_data)}")
-
-    # Save processed data with graphs
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, 'processed_WikiofGraph_with_graphs.jsonl')
-    with open(output_path, 'w') as f:
-        for pair in processed_data:
+    with open(augmented_jsonl_path, 'w') as f:
+        for pair in augmented_data:
             f.write(json.dumps(pair, default=str) + '\n')
 
-    print(f"Processed data with graphs saved to {output_path}")
+    with open(augmented_pickle_path, 'wb') as f:
+        pickle.dump(augmented_data, f)
 
-    
-    
+    print(f"Augmented dataset saved to {augmented_jsonl_path} and {augmented_pickle_path}")
+
+
+
 if __name__ == "__main__":
     main()
