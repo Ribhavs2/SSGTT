@@ -341,7 +341,7 @@ def improved_collate_fn(batch):
 def main():
     parser = argparse.ArgumentParser()
     # Model arguments
-    parser.add_argument('--llm_model_path', type=str, default='meta-llama/Llama-2-7b-hf', choices=['meta-llama/Meta-Llama-3-8B', 'meta-llama/Llama-2-7b-hf'])
+    parser.add_argument('--llm_model_path', type=str, default='models/Llama-3.1-8B-Instruct') # choices=['meta-llama/Meta-Llama-3-8B', 'meta-llama/Llama-2-7b-hf']) #replace with models/Llama-3.1-8B-Instruct
     parser.add_argument('--llm_frozen', type=str, default='False')
     parser.add_argument('--finetune_method', type=str, default='lora', choices=['full', 'lora'])
     parser.add_argument('--gnn_model_name', type=str, default='gt')
@@ -352,8 +352,8 @@ def main():
     parser.add_argument('--gnn_num_heads', type=int, default=8)
     
     # Training arguments
-    parser.add_argument('--data_dir', type=str, default='/shared/eng/pj20/firas_data/action_planner/all_train')
-    parser.add_argument('--output_dir', type=str, default='/shared/eng/pj20/firas_data/action_planner/all_train/checkpoints')
+    parser.add_argument('--data_dir', type=str, default='/work/hdd/bcaq/kagarwal2/')
+    parser.add_argument('--output_dir', type=str, default='/work/hdd/bcaq/kagarwal2/')
     parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='Path to checkpoint to resume training from')
     parser.add_argument('--max_txt_len', type=int, default=2500)
     parser.add_argument('--max_new_tokens', type=int, default=300)  
@@ -387,26 +387,27 @@ def main():
     logger = setup_logging(args)
     
     # Verify HuggingFace access if credentials provided
-    if args.hf_repo_id and args.hf_token:
-        logger.info("Verifying HuggingFace credentials...")
-        if not verify_huggingface_access(args.hf_repo_id, args.hf_token):
-            logger.error("Failed to verify HuggingFace access. Please check your credentials and repository access.")
-            return
+    # if args.hf_repo_id and args.hf_token:
+    #     logger.info("Verifying HuggingFace credentials...")
+    #     if not verify_huggingface_access(args.hf_repo_id, args.hf_token):
+    #         logger.error("Failed to verify HuggingFace access. Please check your credentials and repository access.")
+    #         return
     
-    wandb_enabled = setup_wandb(args)
+    # wandb_enabled = setup_wandb(args) # CHANGE
+    wandb_enabled = False
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Load datasets
     logger.info("Loading datasets...")
     if args.debug:
         logger.info("Debug mode: Loading validation data only...")
-        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'combined_val_v2.pkl'))
+        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl'))
         train_dataset = val_dataset  # Use validation data for training in debug mode
         args.epochs = 1  # Reduce epochs for debugging
         args.batch_size = min(4, args.batch_size)  # Smaller batch size for debugging
     else:
-        train_dataset = PlannerDataset(os.path.join(args.data_dir, 'combined_train_v3.pkl'))
-        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'combined_val_v2.pkl'))
+        train_dataset = PlannerDataset(os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl'))
+        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl'))
     
     val_dataset_small = torch.utils.data.Subset(val_dataset, range(16))
     
