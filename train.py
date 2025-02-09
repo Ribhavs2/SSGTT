@@ -15,7 +15,6 @@ from huggingface_hub import login
 import pickle
 from safetensors.torch import save_model, load_model
 
-
 def safe_save_checkpoint(model, save_path):
     """Simple safetensors save"""
     try:
@@ -181,7 +180,7 @@ def train_epoch(model, train_loader, optimizer, scheduler, epoch, args):
                         'step': batch_idx + epoch * len(train_loader)
                     })
                     
-                # Add checkpoint saving logic
+                # # Add checkpoint saving logic
                 # if checkpoint_interval > 0 and (batch_idx + 1) % checkpoint_interval == 0:
                 #     model_path = os.path.join(args.output_dir, f'latest_checkpoint.safetensors')
                 #     save_model(model, model_path)
@@ -191,16 +190,16 @@ def train_epoch(model, train_loader, optimizer, scheduler, epoch, args):
                 # if checkpoint_interval > 0 and (batch_idx + 1) % (checkpoint_interval * 2) == 0:
                 #     if args.hf_repo_id and args.hf_token:
                 #         upload_to_hub(args, model_path, args.hf_repo_id, args.hf_token)
-                current_step = batch_idx + 1
-                if current_step in checkpoint_points:
-                    position = checkpoint_points[current_step]
-                    model_path = os.path.join(args.output_dir, f'checkpoint_{position}_of_20.safetensors')
-                    safe_save_checkpoint(model, model_path)
-                    logging.info(f'Saved checkpoint at {position}/20 to {model_path} (step {current_step}/{total_steps})')
+                # current_step = batch_idx + 1
+                # if current_step in checkpoint_points:
+                #     position = checkpoint_points[current_step]
+                #     model_path = os.path.join(args.output_dir, f'checkpoint_{position}_of_20.safetensors')
+                #     safe_save_checkpoint(model, model_path)
+                #     logging.info(f'Saved checkpoint at {position}/20 to {model_path} (step {current_step}/{total_steps})')
                     
-                    # Upload to hub if credentials are provided
-                    # if args.hf_repo_id and args.hf_token:
-                    #     upload_to_hub(args, model_path, args.hf_repo_id, args.hf_token)
+                #     # Upload to hub if credentials are provided
+                #     if args.hf_repo_id and args.hf_token:
+                #         upload_to_hub(args, model_path, args.hf_repo_id, args.hf_token)
                     
             except Exception as e:
                 logging.error(f"Error in batch {batch_idx}: {str(e)}")
@@ -339,6 +338,10 @@ def improved_collate_fn(batch):
     }
 
 def main():
+    hf_token = os.getenv("HF_TOKEN")
+    if not hf_token:
+        raise ValueError("Hugging Face token not found! Set HF_TOKEN as an environment variable.")
+
     parser = argparse.ArgumentParser()
     # Model arguments
     parser.add_argument('--llm_model_path', type=str, default='models/Llama-3.1-8B-Instruct') # choices=['meta-llama/Meta-Llama-3-8B', 'meta-llama/Llama-2-7b-hf']) #replace with models/Llama-3.1-8B-Instruct
@@ -352,7 +355,7 @@ def main():
     parser.add_argument('--gnn_num_heads', type=int, default=8)
     
     # Training arguments
-    parser.add_argument('--data_dir', type=str, default='/work/hdd/bcaq/kagarwal2/')
+    parser.add_argument('--data_dir', type=str, default='/work/hdd/bcaq/ribhav/')
     parser.add_argument('--output_dir', type=str, default='/work/hdd/bcaq/kagarwal2/')
     parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='Path to checkpoint to resume training from')
     parser.add_argument('--max_txt_len', type=int, default=2500)
@@ -372,8 +375,8 @@ def main():
     parser.add_argument('--lora_alpha', type=int, default=16)
     parser.add_argument('--lora_dropout', type=float, default=0.05)
     
-    parser.add_argument('--hf_repo_id', type=str, help='Hugging Face repository ID (username/repo-name)')
-    parser.add_argument('--hf_token', type=str, help='Hugging Face API token')
+    parser.add_argument('--hf_repo_id', type=str, default='kushal238/SSGTT', help='Hugging Face repository ID (username/repo-name)')
+    parser.add_argument('--hf_token', type=str, default=hf_token, help='Hugging Face API token')
     
     # Add debug mode argument
     parser.add_argument('--debug', action='store_true', help='Run in debug mode with validation data only')
@@ -387,27 +390,27 @@ def main():
     logger = setup_logging(args)
     
     # Verify HuggingFace access if credentials provided
-    # if args.hf_repo_id and args.hf_token:
-    #     logger.info("Verifying HuggingFace credentials...")
-    #     if not verify_huggingface_access(args.hf_repo_id, args.hf_token):
-    #         logger.error("Failed to verify HuggingFace access. Please check your credentials and repository access.")
-    #         return
+    if args.hf_repo_id and args.hf_token:
+        logger.info("Verifying HuggingFace credentials...")
+        if not verify_huggingface_access(args.hf_repo_id, args.hf_token):
+            logger.error("Failed to verify HuggingFace access. Please check your credentials and repository access.")
+            return
     
-    # wandb_enabled = setup_wandb(args) # CHANGE
-    wandb_enabled = False
+    wandb_enabled = setup_wandb(args) # CHANGE
+    # wandb_enabled = False
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Load datasets
     logger.info("Loading datasets...")
     if args.debug:
         logger.info("Debug mode: Loading validation data only...")
-        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl'))
+        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'dummy_vanilla_WikiofGraph.pkl'))
         train_dataset = val_dataset  # Use validation data for training in debug mode
         args.epochs = 1  # Reduce epochs for debugging
         args.batch_size = min(4, args.batch_size)  # Smaller batch size for debugging
     else:
-        train_dataset = PlannerDataset(os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl'))
-        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl'))
+        train_dataset = PlannerDataset(os.path.join(args.data_dir, 'dummy_vanilla_WikiofGraph.pkl'))
+        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'dummy_vanilla_WikiofGraph.pkl'))
     
     val_dataset_small = torch.utils.data.Subset(val_dataset, range(16))
     
