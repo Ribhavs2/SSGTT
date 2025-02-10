@@ -58,8 +58,9 @@ def upload_to_hub(args, model_path, repo_id, token):
     
 
 class PlannerDataset(Dataset):
-    def __init__(self, data_path):
-        self.data = pickle.load(open(data_path, 'rb'))
+    def __init__(self, data):
+        # self.data = pickle.load(open(data_path, 'rb'))
+        self.data = data
         
     def __len__(self):
         return len(self.data)
@@ -118,7 +119,7 @@ def train_epoch(model, train_loader, optimizer, scheduler, epoch, args):
     
     # Add checkpoint tracking
     total_steps = len(train_loader)
-    # checkpoint_interval = total_steps // 16  # Save 16 times per epoch
+    checkpoint_interval = total_steps // 16  # Save 16 times per epoch
     checkpoint_points = {
         int(total_steps * 0.05): 1,   # 1/20
         int(total_steps * 0.15): 3,   # 3/20
@@ -181,25 +182,25 @@ def train_epoch(model, train_loader, optimizer, scheduler, epoch, args):
                     })
                     
                 # # Add checkpoint saving logic
-                # if checkpoint_interval > 0 and (batch_idx + 1) % checkpoint_interval == 0:
-                #     model_path = os.path.join(args.output_dir, f'latest_checkpoint.safetensors')
-                #     save_model(model, model_path)
-                #     logging.info(f'Saved intermediate checkpoint to {model_path}')
+                if checkpoint_interval > 0 and (batch_idx + 1) % checkpoint_interval == 0:
+                    model_path = os.path.join(args.output_dir, f'latest_checkpoint.safetensors')
+                    save_model(model, model_path)
+                    logging.info(f'Saved intermediate checkpoint to {model_path}')
                     
                 # # Upload to hub every 2 checkpoints
-                # if checkpoint_interval > 0 and (batch_idx + 1) % (checkpoint_interval * 2) == 0:
-                #     if args.hf_repo_id and args.hf_token:
-                #         upload_to_hub(args, model_path, args.hf_repo_id, args.hf_token)
-                # current_step = batch_idx + 1
-                # if current_step in checkpoint_points:
-                #     position = checkpoint_points[current_step]
-                #     model_path = os.path.join(args.output_dir, f'checkpoint_{position}_of_20.safetensors')
-                #     safe_save_checkpoint(model, model_path)
-                #     logging.info(f'Saved checkpoint at {position}/20 to {model_path} (step {current_step}/{total_steps})')
+                if checkpoint_interval > 0 and (batch_idx + 1) % (checkpoint_interval * 2) == 0:
+                    if args.hf_repo_id and args.hf_token:
+                        upload_to_hub(args, model_path, args.hf_repo_id, args.hf_token)
+                current_step = batch_idx + 1
+                if current_step in checkpoint_points:
+                    position = checkpoint_points[current_step]
+                    model_path = os.path.join(args.output_dir, f'checkpoint_{position}_of_20.safetensors')
+                    safe_save_checkpoint(model, model_path)
+                    logging.info(f'Saved checkpoint at {position}/20 to {model_path} (step {current_step}/{total_steps})')
                     
-                #     # Upload to hub if credentials are provided
-                #     if args.hf_repo_id and args.hf_token:
-                #         upload_to_hub(args, model_path, args.hf_repo_id, args.hf_token)
+                    # Upload to hub if credentials are provided
+                    if args.hf_repo_id and args.hf_token:
+                        upload_to_hub(args, model_path, args.hf_repo_id, args.hf_token)
                     
             except Exception as e:
                 logging.error(f"Error in batch {batch_idx}: {str(e)}")
@@ -404,13 +405,28 @@ def main():
     logger.info("Loading datasets...")
     if args.debug:
         logger.info("Debug mode: Loading validation data only...")
-        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'dummy_vanilla_WikiofGraph.pkl'))
+        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl'))
         train_dataset = val_dataset  # Use validation data for training in debug mode
         args.epochs = 1  # Reduce epochs for debugging
         args.batch_size = min(4, args.batch_size)  # Smaller batch size for debugging
     else:
-        train_dataset = PlannerDataset(os.path.join(args.data_dir, 'dummy_vanilla_WikiofGraph.pkl'))
-        val_dataset = PlannerDataset(os.path.join(args.data_dir, 'dummy_vanilla_WikiofGraph.pkl'))
+        # Load full dataset from pickle
+        data_path = os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl')
+        full_data = pickle.load(open(data_path, 'rb'))  # Load data as a list
+
+        # Define split sizes
+        train_size = int(0.8 * len(full_data))
+        val_size = len(full_data) - train_size
+
+        # Split data manually
+        train_data, val_data = full_data[:train_size], full_data[train_size:]
+
+        # Create PlannerDataset objects
+        train_dataset = PlannerDataset(train_data)
+        val_dataset = PlannerDataset(val_data)
+
+        # train_dataset = PlannerDataset(os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl'))
+        # val_dataset = PlannerDataset(os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl'))
     
     val_dataset_small = torch.utils.data.Subset(val_dataset, range(16))
     
@@ -528,7 +544,7 @@ def main():
             # Save best model if validation improves
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                model_path = os.path.join(args.output_dir, 'best_model.safetensors')
+                model_path = os.path.join(args.output_dir, 'best_model_aug.safetensors')
                 save_model(model, model_path)
                 logger.info(f'Saved new best model with validation loss: {val_loss:.4f}')
         
