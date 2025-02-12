@@ -67,8 +67,8 @@ class PlannerDataset(Dataset):
     
     def __getitem__(self, idx):
         return {
-            'input': self.data[idx]['input'],
-            'label': self.data[idx]['label'],
+            'input': self.data[idx]['triplet'],
+            'label': self.data[idx]['text'],
             'graphs': self.data[idx]['graphs']
         }
 
@@ -235,46 +235,53 @@ def test_model_saving(model, args):
         return False
 
 def evaluate(model, val_loader):
+    # print("Comes into evaluate")
     model.eval()
+    # print("Eval runs success")
     total_loss = 0
     valid_batches = 0
     all_predictions = []
     all_labels = []
     
     device = model.device
-    with torch.no_grad():
-        for batch_idx, batch in enumerate(tqdm(val_loader, desc='Evaluating')):
-            try:
-                # Move batch to device
-                if 'input' in batch:
-                    batch['input'] = [x.to(device) if torch.is_tensor(x) else x for x in batch['input']]
-                if 'label' in batch:
-                    batch['label'] = [x.to(device) if torch.is_tensor(x) else x for x in batch['label']]
-                if 'graphs' in batch:
-                    batch['graphs'] = [[g.to(device) for g in graphs] for graphs in batch['graphs']]                
+    try:
+        with torch.no_grad():
+            for batch_idx, batch in enumerate(tqdm(val_loader, desc='Evaluating')):
+                try:
+                    # Move batch to device
+                    if 'input' in batch:
+                        batch['input'] = [x.to(device) if torch.is_tensor(x) else x for x in batch['input']]
+                    if 'label' in batch:
+                        batch['label'] = [x.to(device) if torch.is_tensor(x) else x for x in batch['label']]
+                    if 'graphs' in batch:
+                        batch['graphs'] = [[g.to(device) for g in graphs] for graphs in batch['graphs']]                
 
-                # Skip incomplete batches
-                if len(batch['input']) != val_loader.batch_size:
-                    logging.info(f"Skipping incomplete batch of size {len(batch['input'])}")
+                    # Skip incomplete batches
+                    if len(batch['input']) != val_loader.batch_size:
+                        logging.info(f"Skipping incomplete batch of size {len(batch['input'])}")
+                        continue
+                        
+                    # Get loss and predictions
+                    outputs = model.inference(batch)
+                    loss = model(batch)
+                    
+                    # Track metrics
+                    total_loss += loss.item()
+                    valid_batches += 1
+                    all_predictions.extend(outputs['pred'])
+                    all_labels.extend(batch['label'])
+                    
+                except Exception as e:
+                    logging.error(f"Error in validation batch {batch_idx}: {str(e)}")
+                    # Print more detailed error information
+                    import traceback
+                    logging.error(traceback.format_exc())
                     continue
                     
-                # Get loss and predictions
-                outputs = model.inference(batch)
-                loss = model(batch)
-                
-                # Track metrics
-                total_loss += loss.item()
-                valid_batches += 1
-                all_predictions.extend(outputs['pred'])
-                all_labels.extend(batch['label'])
-                
-            except Exception as e:
-                logging.error(f"Error in validation batch {batch_idx}: {str(e)}")
-                # Print more detailed error information
-                import traceback
-                logging.error(traceback.format_exc())
-                continue
-    
+    except Exception as loader_error:
+        logging.error(f"DataLoader or collate_fn error: {loader_error}")
+        raise loader_error  # re-raise so it propagates up if you want
+
     if valid_batches == 0:
         logging.warning("No valid batches during evaluation!")
         return {
@@ -332,6 +339,7 @@ def improved_collate_fn(batch):
     
     Therefore, a simpler collate_fn is recommended:
     """
+    # print("entered improved collate function")
     return {
         'input': [item['input'] for item in batch],
         'label': [item['label'] for item in batch],
@@ -410,6 +418,7 @@ def main():
         args.epochs = 1  # Reduce epochs for debugging
         args.batch_size = min(4, args.batch_size)  # Smaller batch size for debugging
     else:
+        print("Training mode")
         # Load full dataset from pickle
         data_path = os.path.join(args.data_dir, 'augmented_WikiofGraph.pkl')
         full_data = pickle.load(open(data_path, 'rb'))  # Load data as a list
@@ -419,6 +428,7 @@ def main():
         val_size = len(full_data) - train_size
 
         # Split data manually
+        # print("Testing data:", type(full_data), full_data[:4])
         train_data, val_data = full_data[:train_size], full_data[train_size:]
 
         # Create PlannerDataset objects
