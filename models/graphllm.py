@@ -17,12 +17,12 @@ class GraphLLM(torch.nn.Module):
 
         print('Loading LLAMA')
         kwargs = {
-            "max_memory": {0: '30GiB', 1: '30GiB'},
+            # "max_memory": {0: '30GiB', 1: '30GiB'},
             # "max_memory": {0: '7GiB', 1: '7GiB', 2: '7GiB', 3: '7GiB', 4: '7GiB', 5: '7GiB', 6: '7GiB', 7: '7GiB'},
             # "max_memory": {0: '0GiB', 1: '20GiB', 2: '20GiB', 4: '20GiB'},
             # "max_memory": {0: '0GiB', 1: '30GiB', 2: '10GiB', 3: '10GiB', 4: '10GiB'},
             # "max_memory": {0: '0GiB', 1: '10GiB', 2: '10GiB', 3: '20GiB', 4: '20GiB'},
-            # "max_memory": {0: '30GiB', 1: '30GiB', 2: '30GiB', 3: '30GiB'},
+            "max_memory": {0: '30GiB', 1: '30GiB', 2: '30GiB', 3: '30GiB'},
             # "max_memory": {1: '40GiB', 2: '40GiB', 3: '40GiB', 4: '40GiB', 5: '40GiB'},
             "device_map": "auto",
             "revision": "main",
@@ -94,7 +94,7 @@ class GraphLLM(torch.nn.Module):
             nn.Linear(2048, 4096),
         ).to(self.model.device)
 
-        self.word_embedding = self.model.model.get_input_embeddings()
+        self.word_embedding = self.model.get_input_embeddings()
         
         self.no_graph_embedding = nn.Parameter(
         torch.randn(1, 1, args.gnn_hidden_dim) / math.sqrt(args.gnn_hidden_dim)
@@ -137,7 +137,15 @@ class GraphLLM(torch.nn.Module):
     
     def forward(self, samples):
         # Tokenize inputs and labels
-        inputs = self.tokenizer(samples['input'], add_special_tokens=False)
+
+        flattened_inputs = [" ".join(input_list) if isinstance(input_list, list) else str(input_list) for input_list in samples['input']]
+        # flattened_labels = [" ".join(input_list) if isinstance(input_list, list) else str(input_list) for input_list in samples['label']]
+
+
+        inputs = self.tokenizer(flattened_inputs, add_special_tokens=False)
+        # labels = self.tokenizer(flattened_labels, add_special_tokens=False)
+
+        # inputs = self.tokenizer(samples['input'], add_special_tokens=False)
         labels = self.tokenizer(samples['label'], add_special_tokens=False)
 
         # Get special token ids
@@ -209,7 +217,21 @@ class GraphLLM(torch.nn.Module):
 
     def inference(self, samples):
         # encode inputs
-        inputs = self.tokenizer(samples['input'], add_special_tokens=False)
+        # print("type of samples:", type(samples['input']))
+        # # print()
+        # print(samples['input'])
+
+        # Ensure each batch sample is a string by joining inner lists
+        flattened_inputs = [" ".join(input_list) if isinstance(input_list, list) else str(input_list) for input_list in samples['input']]
+
+        # print("type of samples:", type(flattened_inputs))
+        # # print()
+        # print(flattened_inputs)
+
+        # Now call the tokenizer safely
+        inputs = self.tokenizer(flattened_inputs, add_special_tokens=False)
+
+        # inputs = self.tokenizer(samples['input'], add_special_tokens=False)
         
         # encode special tokens
         eos_user_tokens = self.tokenizer(self.EOS_USER, add_special_tokens=False)
