@@ -67,8 +67,8 @@ class PlannerDataset(Dataset):
     
     def __getitem__(self, idx):
         return {
-            'input': self.data[idx]['triplet'],
-            'label': self.data[idx]['text'],
+            'input': self.data[idx]['input'],
+            'label': self.data[idx]['label'],
             'graphs': self.data[idx]['graphs']
         }
 
