@@ -5,9 +5,16 @@ from collections import Counter
 import re
 import string
 import re
-from nltk import sent_tokenize
-from rouge_score import rouge_scorer, scoring
-import mauve
+from nltk import sent_tokenize # type: ignore
+from rouge_score import rouge_scorer, scoring # type: ignore
+import mauve # type: ignore
+
+import copy
+import json
+from metrics import *
+from utils import * # type: ignore
+from sentence_transformers import SentenceTransformer # type: ignore
+import torch.nn.functional as F
 
 def exact_match_score(prediction, ground_truth):
     return (normalize_answer(prediction) == normalize_answer(ground_truth))
@@ -113,12 +120,6 @@ def match(prediction, ground_truth):
     return 0
 
 
-import copy
-import json
-from metrics import *
-from utils import *
-from sentence_transformers import SentenceTransformer
-import torch.nn.functional as F
 
 # Load the sentence transformer model
 model = SentenceTransformer('sentence-transformers/all-roberta-large-v1')
@@ -147,20 +148,14 @@ def cosine_match(output, golds, threshold=0.63):
 
 def compute_rouge(data):
     """Main function for rouge scoring.
-    If two references are provided,
-    the best score is chosen for each instance.
+    If two references are provided, the best score is chosen for each instance.
     Args:
-        data: requires field `output` and `answer` (or `annotations` for ASQA)
-        metrics: list of evaluation metrics
+        data: requires field `output` and `label` (or `annotations` for ASQA)
     Returns:
         dictionary representation of rouge scores
     """
-    def _rouge_calculation(hypotheses,
-                        references1,
-                        references2=[],
-                        metrics=['rougeLsum']):
-
-        if references2 == []:
+    def _rouge_calculation(hypotheses, references1, references2=[], metrics=['rougeLsum']):
+        if not references2:
             references2 = references1
 
         scorer = rouge_scorer.RougeScorer(metrics, use_stemmer=True)
@@ -175,7 +170,6 @@ def compute_rouge(data):
                 aggregator.add_scores(scores2)
 
         scores = {m: [] for m in metrics}
-
         for m in metrics:
             fmeasure = aggregator.aggregate()[m].mid.fmeasure
             scores[m].append(fmeasure)
@@ -185,26 +179,22 @@ def compute_rouge(data):
 
         return scores
 
-    hypotheses = {}
-    references1 = {}
-    references2 = {}
+    hypotheses, references1, references2 = {}, {}, {}
 
     for idx, item in enumerate(data):
         hypotheses[idx] = item["output"]
-        if "annotations" in item and item['annotations'] is not None: # For ASQA
+        if "annotations" in item and item['annotations'] is not None:  # For ASQA
             references1[idx] = item["annotations"][0]["long_answer"]
             references2[idx] = item["annotations"][1]["long_answer"]
         else:
-            references1[idx] = item["answer"]
-            references2[idx] = item["answer"]
+            references1[idx] = item["label"]  # Changed from "answer" to "label"
+            references2[idx] = item["label"]  # Changed from "answer" to "label"
 
     h, r1, r2 = [], [], []
-
     for key in references1:
         h.append(hypotheses[key])
         r1.append(references1[key])
-
-        if references2 is not None:
+        if references2:
             r2.append(references2[key])
 
     h = ['\n'.join(sent_tokenize(text.lower())) for text in h]
@@ -230,3 +220,12 @@ def mauve_score(predictions, references):
         featurize_model_name="gpt2-large"
     )
     return mauve_results.mauve * 100
+
+
+
+
+
+
+
+
+
