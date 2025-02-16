@@ -7,6 +7,8 @@ from torch_scatter import scatter
 from models.gnns import load_gnn_model
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import math
+from torch_geometric.data import Data  # ✅ Fixes the NameError
+
 
 
 class GraphLLM(torch.nn.Module):
@@ -18,11 +20,12 @@ class GraphLLM(torch.nn.Module):
         print('Loading LLAMA')
         kwargs = {
             # "max_memory": {0: '30GiB', 1: '30GiB'},
+            "max_memory": {0: '50GiB'},
             # "max_memory": {0: '7GiB', 1: '7GiB', 2: '7GiB', 3: '7GiB', 4: '7GiB', 5: '7GiB', 6: '7GiB', 7: '7GiB'},
             # "max_memory": {0: '0GiB', 1: '20GiB', 2: '20GiB', 4: '20GiB'},
             # "max_memory": {0: '0GiB', 1: '30GiB', 2: '10GiB', 3: '10GiB', 4: '10GiB'},
             # "max_memory": {0: '0GiB', 1: '10GiB', 2: '10GiB', 3: '20GiB', 4: '20GiB'},
-            "max_memory": {0: '30GiB', 1: '30GiB', 2: '30GiB', 3: '30GiB'},
+            # "max_memory": {0: '30GiB', 1: '30GiB', 2: '30GiB', 3: '30GiB'},
             # "max_memory": {1: '40GiB', 2: '40GiB', 3: '40GiB', 4: '40GiB', 5: '40GiB'},
             "device_map": "auto",
             "revision": "main",
@@ -51,6 +54,15 @@ class GraphLLM(torch.nn.Module):
             low_cpu_mem_usage=True,
             **kwargs
         )
+
+        print("Haan ji")
+        # model = AutoModelForCausalLM.from_pretrained(
+        #     args.llm_model_path,
+        #     torch_dtype=torch.float16,
+        #     device_map={"": "cuda:0"},  # ✅ Force entire model onto GPU
+        #     low_cpu_mem_usage=True
+        # )
+
 
         if args.llm_frozen == 'True':
             print("Freezing LLAMA!")
@@ -164,6 +176,7 @@ class GraphLLM(torch.nn.Module):
         # First pass - get all embeddings and lengths
         for i in range(batch_size):
             # Encode graphs
+            
             graph_embeds = self.encode_graphs(samples['graphs'][i])  # [1, 1, hidden_dim]
             assert graph_embeds.size(-1) == self.projector[0].in_features, \
                 f"Graph embedding dimension mismatch: {graph_embeds.size(-1)} vs {self.projector[0].in_features}"
@@ -221,6 +234,15 @@ class GraphLLM(torch.nn.Module):
         # # print()
         # print(samples['input'])
 
+        print("model device:", self.model.device)
+
+        # Input validation function
+        def validate_tensor(tensor, name):
+            if torch.isnan(tensor).any():
+                raise ValueError(f"NaN values detected in {name}")
+            if torch.isinf(tensor).any():
+                raise ValueError(f"Inf values detected in {name}")
+
         # Ensure each batch sample is a string by joining inner lists
         flattened_inputs = [" ".join(input_list) if isinstance(input_list, list) else str(input_list) for input_list in samples['input']]
 
@@ -236,9 +258,21 @@ class GraphLLM(torch.nn.Module):
         # encode special tokens
         eos_user_tokens = self.tokenizer(self.EOS_USER, add_special_tokens=False)
         bos_embeds = self.word_embedding(
-            self.tokenizer(self.BOS, add_special_tokens=False, return_tensors='pt').input_ids[0]
+            self.tokenizer(self.BOS, add_special_tokens=False, return_tensors='pt').input_ids[0].to(self.model.device)
         ).to(self.model.device)
-        pad_embeds = self.word_embedding(torch.tensor(self.tokenizer.pad_token_id)).unsqueeze(0).to(self.model.device)
+        # bos_embeds = self.word_embedding(
+        #     self.tokenizer(self.BOS, add_special_tokens=False, return_tensors='pt').input_ids.to(self.model.device, dtype=torch.long)
+        # )
+        # validate_tensor(bos_embeds, "bos_embeds")
+
+        pad_token_tensor = torch.tensor(self.tokenizer.pad_token_id, device=self.model.device)
+        pad_embeds = self.word_embedding(pad_token_tensor).unsqueeze(0)
+        # pad_embeds = self.word_embedding(
+        #     torch.tensor([self.tokenizer.pad_token_id], dtype=torch.long, device=self.model.device)
+        # ).unsqueeze(0)
+        # validate_tensor(pad_embeds, "pad_embeds")
+
+        # pad_embeds = self.word_embedding(torch.tensor(self.tokenizer.pad_token_id)).unsqueeze(0).to(self.model.device)
 
         batch_size = len(samples['input'])
         batch_inputs_embeds = []
@@ -246,12 +280,22 @@ class GraphLLM(torch.nn.Module):
         
         for i in range(batch_size):
             # Encode graphs for this sample
-            graph_embeds = self.encode_graphs(samples['graphs'][i])  # [1, 1, hidden_dim]
+            print(samples['graphs'])
+            graph_embeds = self.encode_graphs(samples['graphs']).to(self.model.device)  # [1, 1, hidden_dim]
+            # validate_tensor(graph_embeds, f"graph_embeds batch {i}")
+
             graph_embeds = self.projector(graph_embeds.squeeze(1))  # [1, proj_dim]
+            # validate_tensor(graph_embeds, f"projected_graph_embeds batch {i}")
+            
             
             # Add special tokens and create input embeddings
             input_ids = inputs.input_ids[i][:self.max_txt_len] + eos_user_tokens.input_ids
-            inputs_embeds = self.word_embedding(torch.tensor(input_ids).to(self.model.device))
+            inputs_embeds = self.word_embedding(torch.tensor(input_ids, device=self.model.device))
+
+            # input_ids_tensor = torch.tensor(input_ids, dtype=torch.long, device=self.model.device)
+            # inputs_embeds = self.word_embedding(input_ids_tensor)
+
+            # validate_tensor(inputs_embeds, f"inputs_embeds batch {i}")
             
             # Concatenate all embeddings
             inputs_embeds = torch.cat([
@@ -259,8 +303,11 @@ class GraphLLM(torch.nn.Module):
                 graph_embeds,
                 inputs_embeds
             ], dim=0)
-            
-            batch_inputs_embeds.append(inputs_embeds)
+            # validate_tensor(inputs_embeds, f"concatenated_embeds batch {i}")
+
+            # batch_inputs_embeds.append(inputs_embeds)
+            batch_inputs_embeds.append(inputs_embeds.to(self.model.device))
+
             batch_attention_mask.append([1] * inputs_embeds.shape[0])
 
         # Pad inputs to max length
@@ -269,14 +316,39 @@ class GraphLLM(torch.nn.Module):
             pad_length = max_length - batch_inputs_embeds[i].shape[0]
             if pad_length > 0:
                 batch_inputs_embeds[i] = torch.cat([
-                    pad_embeds.repeat(pad_length, 1), 
-                    batch_inputs_embeds[i]
+                    pad_embeds.repeat(pad_length, 1).to(self.model.device), 
+                    batch_inputs_embeds[i].to(self.model.device)
                 ])
                 batch_attention_mask[i] = [0] * pad_length + batch_attention_mask[i]
 
         # Stack tensors
         inputs_embeds = torch.stack(batch_inputs_embeds, dim=0).to(self.model.device)
-        attention_mask = torch.tensor(batch_attention_mask).to(self.model.device)
+        attention_mask = torch.tensor(batch_attention_mask,  device=self.model.device)
+        # attention_mask = (attention_mask > 0).float().to(self.model.device)  # Ensure it's float
+
+
+        # validate_tensor(inputs_embeds, "final_inputs_embeds")
+
+        # Print shapes and stats for debugging
+        # print(f"inputs_embeds shape: {inputs_embeds.shape}")
+        # print(f"attention_mask shape: {attention_mask.shape}")
+        # print(f"inputs_embeds range: [{inputs_embeds.min():.3f}, {inputs_embeds.max():.3f}]")
+
+        # print(f"attention_mask values: {attention_mask.sum(dim=1)}")  # Should show number of non-pad tokens per batch
+
+        # inputs_embeds = torch.clamp(inputs_embeds, min=0, max=1)
+        # print(f"inputs_embeds range after clamping: [{inputs_embeds.min():.3f}, {inputs_embeds.max():.3f}]")
+        # Before calling model.generate(), check for NaNs and invalid values
+        # validate_tensor(inputs_embeds, "final_inputs_embeds before generate")
+        # validate_tensor(attention_mask, "attention_mask before generate")
+
+        # if torch.isnan(inputs_embeds).any() or torch.isinf(inputs_embeds).any():
+        #     raise ValueError("NaN or Inf detected in inputs_embeds before generate!")
+
+        # if (inputs_embeds < 0).any():
+        #     print(f"Warning: Negative values found in inputs_embeds!")
+                  
+       
 
         # Generate with autocast
         with self.maybe_autocast():
@@ -285,6 +357,17 @@ class GraphLLM(torch.nn.Module):
                 max_new_tokens=self.max_new_tokens,
                 attention_mask=attention_mask,
                 use_cache=True, 
+                temperature=0.4,  # Avoid extremely sharp probabilities
+                top_p=0.8,
+                top_k=50
+                # do_sample=False,     # Disable sampling completely
+                # num_beams=1,        # Use greedy search
+                # pad_token_id=self.tokenizer.pad_token_id,
+                # eos_token_id=self.tokenizer.eos_token_id,
+                # repetition_penalty=1.0,
+                # length_penalty=1.0,
+                # no_repeat_ngram_size=0,
+                # early_stopping=True
                 # pad_token_id=self.tokenizer.pad_token_id,
                 # eos_token_id=self.tokenizer.eos_token_id,
             )
@@ -309,6 +392,186 @@ class GraphLLM(torch.nn.Module):
             'label': samples['label'],
         }
         
+    # def inference(self, samples):
+    #     print("model device:", self.model.device)  # Debugging line to check device
+
+    #     device = self.model.device  # Get model's device (cuda:0 or cpu)
+
+    #     # Ensure each batch sample is a string by joining inner lists
+    #     flattened_inputs = [" ".join(input_list) if isinstance(input_list, list) else str(input_list) for input_list in samples['input']]
+
+    #     # Tokenize inputs
+    #     inputs = self.tokenizer(flattened_inputs, add_special_tokens=False)
+
+    #     # Move special tokens to the correct device
+    #     eos_user_tokens = self.tokenizer(self.EOS_USER, add_special_tokens=False)
+    #     # bos_embeds = self.word_embedding(
+    #     #     self.tokenizer(self.BOS, add_special_tokens=False, return_tensors='pt').input_ids[0]
+    #     # ).to(device)
+    #     # pad_embeds = self.word_embedding(torch.tensor(self.tokenizer.pad_token_id, device=device)).unsqueeze(0)
+
+    #     # Ensure input tensors are moved to the correct device before embedding
+    #     bos_ids = self.tokenizer(self.BOS, add_special_tokens=False, return_tensors='pt').input_ids.to(device)  # ✅ Move to GPU
+    #     bos_embeds = self.word_embedding(bos_ids).squeeze(0)  # ✅ Ensure correct shape and on cuda:0
+
+    #     pad_ids = torch.tensor([self.tokenizer.pad_token_id], device=device)  # ✅ Ensure pad token is on cuda:0
+    #     pad_embeds = self.word_embedding(pad_ids).unsqueeze(0)  # ✅ Correct shape
+
+
+    #     batch_size = len(samples['input'])
+    #     batch_inputs_embeds = []
+    #     batch_attention_mask = []
+
+    #     for i in range(batch_size):
+    #         # Encode graphs for this sample and ensure they are on the same device
+    #         # graph_embeds = self.encode_graphs(samples['graphs'][i]).to(device)  # ✅ Move graph embeddings to correct device
+    #         if not samples['graphs']:  # ✅ Check if the graphs list is empty
+    #             print(f"Warning: Sample {i} has no valid graphs.")
+    #             graph_embeds = torch.zeros((1, 1, self.projector[0].in_features), device=device)  # Return zero tensor if no graphs
+    #         else:
+    #             # Ensure we have a list of graphs and each graph is moved to the correct device
+    #             graph_list = samples['graphs']
+    #             if isinstance(graph_list, Data):  # ✅ If only one graph, wrap it in a list
+    #                 graph_list = [graph_list]
+
+    #             # Encode all graphs and move to device
+    #             graph_embeds = self.encode_graphs(graph_list).to(device)
+
+
+    #         graph_embeds = self.projector(graph_embeds.squeeze(1)).to(device)  # ✅ Ensure projected embeddings are on the correct device
+
+    #         # Convert tokenized input to tensor and move to the correct device
+    #         input_ids = torch.tensor(inputs.input_ids[i][:self.max_txt_len], device=device)  # ✅ Ensure input IDs are on device
+    #         eos_user_ids = torch.tensor(eos_user_tokens.input_ids, device=device)  # ✅ Ensure eos_user tokens are on device
+
+    #         # Create input embeddings
+    #         inputs_embeds = self.word_embedding(input_ids)
+            
+    #         # Concatenate all embeddings
+    #         inputs_embeds = torch.cat([bos_embeds, graph_embeds, inputs_embeds], dim=0)
+
+    #         batch_inputs_embeds.append(inputs_embeds)
+    #         batch_attention_mask.append([1] * inputs_embeds.shape[0])
+
+    #     # Pad inputs to max length
+    #     max_length = max([x.shape[0] for x in batch_inputs_embeds])
+    #     for i in range(batch_size):
+    #         pad_length = max_length - batch_inputs_embeds[i].shape[0]
+    #         if pad_length > 0:
+    #             batch_inputs_embeds[i] = torch.cat([pad_embeds.repeat(pad_length, 1), batch_inputs_embeds[i]])
+    #             batch_attention_mask[i] = [0] * pad_length + batch_attention_mask[i]
+
+    #     # Stack tensors and move them to the correct device
+    #     inputs_embeds = torch.stack(batch_inputs_embeds, dim=0).to(device)  # ✅ Ensure input embeddings are on device
+    #     attention_mask = torch.tensor(batch_attention_mask, device=device)  # ✅ Ensure attention mask is on device
+
+    #     # Generate with autocast
+    #     with self.maybe_autocast():
+    #         outputs = self.model.generate(
+    #             inputs_embeds=inputs_embeds,
+    #             max_new_tokens=self.max_new_tokens,
+    #             attention_mask=attention_mask,
+    #             use_cache=True, 
+    #         )
+
+    #     predictions = self.tokenizer.batch_decode(outputs, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+
+    #     return {
+    #         'input': samples['input'],
+    #         'pred': predictions,
+    #         'label': samples['label'],
+    #     }
+
+
+
+    # def inference(self, samples):
+    #     print("model device:", self.model.device)  # Debugging line to check device
+
+    #     device = self.model.device  # Get model's device (cuda:0 or cpu)
+
+    #     # Ensure each batch sample is a string by joining inner lists
+    #     flattened_inputs = [" ".join(input_list) if isinstance(input_list, list) else str(input_list) for input_list in samples['input']]
+
+    #     print("Flattened inputs:", flattened_inputs)
+    #     # Tokenize inputs
+    #     inputs = self.tokenizer(flattened_inputs, add_special_tokens=False)
+
+    #     # Move special tokens to the correct device
+    #     eos_user_tokens = self.tokenizer(self.EOS_USER, add_special_tokens=False)
+
+    #     # Ensure input tensors are moved to the correct device before embedding
+    #     bos_ids = self.tokenizer(self.BOS, add_special_tokens=False, return_tensors='pt').input_ids.to(device)  # ✅ Move to GPU
+    #     bos_embeds = self.word_embedding(bos_ids).squeeze(0)  # ✅ Ensure correct shape and on cuda:0
+
+    #     pad_ids = torch.tensor([self.tokenizer.pad_token_id], device=device)  # ✅ Ensure pad token is on cuda:0
+    #     pad_embeds = self.word_embedding(pad_ids).squeeze(0)  # ✅ Ensure correct shape [embedding_dim]
+
+    #     batch_size = len(samples['input'])
+    #     batch_inputs_embeds = []
+    #     batch_attention_mask = []
+
+    #     print("Batch size: ", batch_size)
+    #     for i in range(batch_size):
+    #         print(samples['graphs'])
+    #         # Handle graph encoding
+    #         if not samples['graphs']:  # ✅ Check if the graphs list is empty
+    #             print(f"Warning: Sample {i} has no valid graphs.")
+    #             graph_embeds = torch.zeros((1, self.projector[0].in_features), device=device)  # ✅ Return zero tensor if no graphs
+    #         else:
+    #             # Ensure we have a list of graphs and each graph is moved to the correct device
+    #             graph_list = samples['graphs']
+    #             if isinstance(graph_list, Data):  # ✅ If only one graph, wrap it in a list
+    #                 graph_list = [graph_list]
+                
+    #             print("Graph list: ", graph_list)
+    #             # Encode all graphs and move to device
+    #             graph_embeds = self.encode_graphs(graph_list).to(device)
+
+    #         graph_embeds = self.projector(graph_embeds.squeeze(0)).to(device)  # ✅ Ensure projected embeddings are on the correct device
+
+    #         # Convert tokenized input to tensor and move to the correct device
+    #         input_ids = torch.tensor(inputs.input_ids[i][:self.max_txt_len], device=device)  # ✅ Ensure input IDs are on device
+    #         eos_user_ids = torch.tensor(eos_user_tokens.input_ids, device=device)  # ✅ Ensure eos_user tokens are on device
+
+    #         # Create input embeddings
+    #         inputs_embeds = self.word_embedding(input_ids)
+
+    #         # Concatenate all embeddings
+    #         inputs_embeds = torch.cat([bos_embeds, graph_embeds, inputs_embeds], dim=0)
+
+    #         batch_inputs_embeds.append(inputs_embeds)
+    #         batch_attention_mask.append([1] * inputs_embeds.shape[0])
+
+    #     # Pad inputs to max length
+    #     max_length = max(x.shape[0] for x in batch_inputs_embeds)
+    #     for i in range(batch_size):
+    #         pad_length = max_length - batch_inputs_embeds[i].shape[0]
+    #         if pad_length > 0:
+    #             repeated_pad = pad_embeds.unsqueeze(0).expand(pad_length, -1)  # ✅ Correctly shape padding
+    #             batch_inputs_embeds[i] = torch.cat([repeated_pad, batch_inputs_embeds[i]], dim=0)
+    #             batch_attention_mask[i] = [0] * pad_length + batch_attention_mask[i]
+
+    #     # Stack tensors and move them to the correct device
+    #     inputs_embeds = torch.stack(batch_inputs_embeds, dim=0).to(device)  # ✅ Ensure input embeddings are on device
+    #     attention_mask = torch.tensor(batch_attention_mask, dtype=torch.long, device=device)  # ✅ Ensure attention mask is on device
+
+    #     # Generate with autocast
+    #     with self.maybe_autocast():
+    #         outputs = self.model.generate(
+    #             inputs_embeds=inputs_embeds,
+    #             max_new_tokens=self.max_new_tokens,
+    #             attention_mask=attention_mask,
+    #             use_cache=True,
+    #         )
+
+    #     predictions = self.tokenizer.batch_decode(outputs, skip_special_tokens=False, clean_up_tokenization_spaces=False)
+
+    #     return {
+    #         'input': samples['input'],
+    #         'pred': predictions,
+    #         'label': samples['label'],
+    #     }
+
     def maybe_autocast(self, dtype=torch.bfloat16):
         """Helper for handling autocast"""
         enable_autocast = self.device != torch.device("cpu")
